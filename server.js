@@ -23,7 +23,10 @@ if (!process.env.MONGO_URL) {
 
 /* ───────────────── App & Middleware ────────────────────────────── */
 const app = express();
-app.use(cors());
+const allowedOrigin = process.env.FRONTEND_URL;
+app.use(cors({
+  origin: allowedOrigin ? allowedOrigin : '*'
+}));
 app.use(express.json({ limit: '10mb' }));
 
 const upload = multer({

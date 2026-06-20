@@ -74,17 +74,39 @@ const ContractSchema = new mongoose.Schema({
 
 const Contract = mongoose.model("Contract", ContractSchema);
 
-/* ───────────────── Gemini Init ─────────────────────────────────── */
+/* ───────────────── Gemini Init & Fallback ──────────────────────── */
 const genAI = new GoogleGenerativeAI(GEMINI_APIKey);
-const geminiInfo = { model: 'gemini-2.5-flash' };
-let geminiModel;
+
+async function generateContentWithFallback(prompt, generationConfig = {}) {
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+  let lastError;
+  
+  for (const modelName of models) {
+    try {
+      console.log(`🤖 Attempting content generation with model: ${modelName}`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt, { generationConfig });
+      console.log(`✅ Success with model: ${modelName}`);
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ Model ${modelName} failed. Error: ${error.message || error}`);
+      if (modelName === models[models.length - 1]) {
+        break;
+      }
+      console.log(`🔄 Falling back to the next model...`);
+    }
+  }
+  
+  throw lastError;
+}
+
 (async () => {
   try {
-    geminiModel = genAI.getGenerativeModel(geminiInfo);
-    const t = await geminiModel.generateContent('Ping');
-    console.log('✅ Gemini ready →', t.response.text().slice(0, 30), '…');
+    const t = await generateContentWithFallback('Ping', { maxOutputTokens: 10 });
+    console.log('✅ Gemini ready (verified via fallback mechanism)');
   } catch (e) {
-    console.error('Gemini init failed:', e.message); process.exit(1);
+    console.error('❌ Gemini init failed:', e.message); process.exit(1);
   }
 })();
 
@@ -156,18 +178,18 @@ async function processContract(docId, pdfBuffer, pdfName) {
     }
 
     // Process submittals first
-    const submittalsResponse = await geminiModel.generateContent(
+    const submittalsResponse = await generateContentWithFallback(
       submittalPrompt(pdfName, text),
-      { generationConfig: { temperature: 0.1, maxOutputTokens: 1024 } }
+      { temperature: 0.1, maxOutputTokens: 1024 }
     );
 
     // Wait before second call
     await new Promise(res => setTimeout(res, 15000));
 
     // Process fields
-    const fieldsResponse = await geminiModel.generateContent(
+    const fieldsResponse = await generateContentWithFallback(
       buildPrompt(pdfName, text),
-      { generationConfig: { temperature: 0.1, maxOutputTokens: 2048 } }
+      { temperature: 0.1, maxOutputTokens: 2048 }
     );
 
     const fieldsData = extractJson(fieldsResponse.response.text());
@@ -203,7 +225,7 @@ async function processContract(docId, pdfBuffer, pdfName) {
 
 /* ───────────────── API Endpoints ───────────────────────────────── */
 app.get('/health', (req, res) => res.json({
-  status: 'healthy', ai_provider: 'google-gemini', model: geminiInfo.model,
+  status: 'healthy', ai_provider: 'google-gemini', models: ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'],
   db: mongoStatus, ts: new Date().toISOString()
 }));
 
@@ -313,5 +335,5 @@ app.get('/api/submittals/:id', async (req, res) => {
 
 /* ───────────────── Server Start ────────────────────────────────── */
 app.listen(PORT, () => console.log(
-  `🚀 Gemini Analyzer on http://localhost:${PORT} (model ${geminiInfo.model})`
+  `🚀 Gemini Analyzer on http://localhost:${PORT} (models: gemini-2.5-flash, gemini-1.5-flash, gemini-1.5-flash-8b)`
 ));
